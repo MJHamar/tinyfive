@@ -1,5 +1,7 @@
-import numpy as np
+from time import time
 from typing import Union
+
+import numpy as np
 
 from .machine import machine
 
@@ -47,7 +49,7 @@ class pseudo_asm_machine(machine):
         
         # NOTE: s.pc is always incremented by multiples of 4
         if end is None and not instructions: # execute until the end by default
-            end = len(s.prrogram) * 4
+            end = len(program) * 4
         elif end is None: # stop after a given number of instructions
             end = start + instructions * 4
         else: # stop at the given end label or address
@@ -55,9 +57,18 @@ class pseudo_asm_machine(machine):
         while s.pc < end:
             # get the next instruction
             instruction = program[s.pc // 4]
-            # execute the instruction. this also increments the prrogram counter appropriately
+            # execute the instruction. this also increments the program counter appropriately
             instruction(s) # pass self.
         # done
+
+    def measure_latency(s):
+        """
+        Measure the latency of the program.
+        """
+        start = time()
+        s.exe()
+        end = time()
+        return float(end - start)
 
     def reset_state(s):
         """
@@ -96,6 +107,15 @@ class multi_machine(object):
         """
         for machine in s.machines:
             machine.exe(start, end, instructions, s.program)
+    
+    def measure_latency(s):
+        """
+        Measure the latency of the program on all machines.
+        """
+        latencies = []
+        for machine in s.machines:
+            latencies.append(machine.measure_latency())
+        return latencies
     
     def reset_state(s):
         """

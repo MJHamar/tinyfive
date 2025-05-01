@@ -19,6 +19,9 @@ class pseudo_asm_machine(machine):
     def __init__(s, mem_size):
         super().__init__(mem_size)
         s.program = []
+        s.mem_usage = np.zeros(mem_size, dtype=np.int8)
+        s.x_usage = np.zeros(32, dtype=np.int8)
+        s.f_usage = np.zeros(32, dtype=np.int8)
     
     @staticmethod
     def insn_wrapper(op_str, operands):
@@ -94,7 +97,7 @@ class pseudo_asm_machine(machine):
         s.pc = 0
         s.clear_cpu()
         s.clear_mem()
-        
+    
     @property
     def registers(self):
         return np.concatenate([self.x, self.f], axis=0)
@@ -192,3 +195,24 @@ class multi_machine(object):
     @property
     def memory_mask(self):
         return np.stack([m.memory_mask for m in self.machines])
+    
+    def clone(self):
+        # takes care of creating the new machine instances
+        clone = multi_machine(self.mem_size, self.num_machines)
+        # copy the program
+        clone.program = self.program.copy()
+        # copy the state of each machine
+        for i in range(self.num_machines):
+            c = clone.machines[i]
+            s = self.machines[i]
+            c.mem =            s.mem.copy()
+            c.x =              s.x.copy()
+            c.f =              s.f.copy()
+            c.pc =             s.pc.copy()
+            c.label_dict =     s.label_dict.copy()
+            c.ops =            s.ops.copy()
+            c.x_usage =        s.x_usage.copy()
+            c.f_usage =        s.f_usage.copy()
+            c.mem_usage =      s.mem_usage.copy()
+            c.machines[i].pc = s.machines[i].pc
+        return clone

@@ -26,9 +26,26 @@ class pseudo_asm_machine(machine):
         Wrapper function to call the instruction function with the operands.
         """
         def wrapper(instance):
+            instance._update_counters(
+                op_str, operands[0], operands[1] if len(operands) > 2 else None) # mem is always at pos 3
             return getattr(instance, op_str)(*operands)
         return wrapper
     
+    def _update_counters(s, opcode, rd, mem):
+        """Update self.x_usage, self.f_usage and self.mem_usage counters."""
+        # borrowed from super().dec()
+        if opcode.lower() not in ['beq', 'bne', 'blt', 'bge', 'bltu', 'bgeu', 'sb', 'sh', 'sw', 'fsw.s']:
+            assert rd is not None, f"rd is None for opcode {opcode}"
+            if opcode.lower() in ['fadd.s', 'fsub.s', 'fmul.s', 'fdiv.s', 'fsqrt.s', 'fmin.s', 'fmax.s',
+                    'fmadd.s', 'fmsub.s', 'fnmadd.s', 'fnmsub.s', 'flw.s', 'fsgnj.s',
+                    'fsgnjn.s', 'fsgnjx.s', 'fcvt.s.w', 'fcvt.s.wu', 'fmv.w.x']:
+                s.f_usage[rd] = 1
+            else:
+                s.x_usage[rd] = 1
+        if opcode.lower() in ['sb', 'sh', 'sw', 'fsw.s']:
+            assert mem is not None, f"mem is None for opcode {opcode}"
+            s.mem_usage[mem] = 1
+
     def append_instruction(s, opcode, operands):
         # TODO: check if the opcode is valid.
         # TODO: check signature of op_fn and make sure it is correct.
@@ -77,6 +94,19 @@ class pseudo_asm_machine(machine):
         s.pc = 0
         s.clear_cpu()
         s.clear_mem()
+        
+    @property
+    def registers(self):
+        return np.concatenate([self.x, self.f], axis=0)
+    @property
+    def memory(self):
+        return self.mem
+    @property
+    def register_mask(self):
+        return np.concatenate([self.x_usage, self.f_usage], axis=0)
+    @property
+    def memory_mask(self):
+        return self.mem_usage
 
 class multi_machine(object):
     """
@@ -149,3 +179,16 @@ class multi_machine(object):
             instance.write_f32(inputs, 0)
         else:
             raise ValueError(f"Unsupported input type: {type(inputs)}")
+
+    @property
+    def registers(self):
+        return np.stack([m.registers for m in self.machines])
+    @property
+    def memory(self):
+        return np.stack([m.memory for m in self.machines])
+    @property
+    def register_mask(self):
+        return np.stack([m.register_mask for m in self.machines])
+    @property
+    def memory_mask(self):
+        return np.stack([m.memory_mask for m in self.machines])

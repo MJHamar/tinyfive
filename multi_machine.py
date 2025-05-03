@@ -16,45 +16,38 @@ class pseudo_asm_machine(machine):
     - exe -- instead of disassembling the program, it uses the above program list and selects the next instruction
                 based on the program counter.
     """
+    rd_opcodes = {'beq', 'bne', 'blt', 'bge', 'bltu', 'bgeu', 'sb', 'sh', 'sw', 'fsw.s'}
+    float_opcodes = {'fadd.s', 'fsub.s', 'fmul.s', 'fdiv.s', 'fsqrt.s', 'fmin.s', 'fmax.s',
+                    'fmadd.s', 'fmsub.s', 'fnmadd.s', 'fnmsub.s', 'flw.s', 'fsgnj.s',
+                    'fsgnjn.s', 'fsgnjx.s', 'fcvt.s.w', 'fcvt.s.wu', 'fmv.w.x'}
+    store_opcodes = {'sb', 'sh', 'sw', 'fsw.s'}
+    
     def __init__(s, mem_size):
         super().__init__(mem_size)
         s.program = []
-        s.mem_usage = np.zeros(mem_size, dtype=np.int8)
+        s.mem_usage = np.zeros(mem_size//4, dtype=np.int8)
         s.x_usage = np.zeros(32, dtype=np.int8)
         s.x_usage[0] = 1 # x0 is always used
         s.f_usage = np.zeros(32, dtype=np.int8)
     
-    @staticmethod
-    def insn_wrapper(op_str, operands):
-        """
-        Wrapper function to call the instruction function with the operands.
-        """
-        def wrapper(instance):
-            instance._update_counters(
-                op_str, operands[0], operands[1] if len(operands) > 2 else None) # mem is always at pos 3
-            return getattr(instance, op_str)(*operands)
-        return wrapper
-    
     def _update_counters(s, opcode, rd, mem):
         """Update self.x_usage, self.f_usage and self.mem_usage counters."""
         # borrowed from super().dec()
-        if opcode.lower() not in ['beq', 'bne', 'blt', 'bge', 'bltu', 'bgeu', 'sb', 'sh', 'sw', 'fsw.s']:
+        if opcode.lower() not in s.rd_opcodes:
             assert rd is not None, f"rd is None for opcode {opcode}"
-            if opcode.lower() in ['fadd.s', 'fsub.s', 'fmul.s', 'fdiv.s', 'fsqrt.s', 'fmin.s', 'fmax.s',
-                    'fmadd.s', 'fmsub.s', 'fnmadd.s', 'fnmsub.s', 'flw.s', 'fsgnj.s',
-                    'fsgnjn.s', 'fsgnjx.s', 'fcvt.s.w', 'fcvt.s.wu', 'fmv.w.x']:
+            if opcode.lower() in s.float_opcodes:
                 s.f_usage[rd] = 1
             else:
                 s.x_usage[rd] = 1
-        if opcode.lower() in ['sb', 'sh', 'sw', 'fsw.s']:
+        if opcode.lower() in s.float_opcodes:
             assert mem is not None, f"mem is None for opcode {opcode}"
-            s.mem_usage[mem] = 1
+            s.mem_usage[mem//4] = 1 # NOTE: assumes 4 byte alignment
 
     def append_instruction(s, opcode, operands):
         # TODO: check if the opcode is valid.
         # TODO: check signature of op_fn and make sure it is correct.
         # TODO: resolve labels in operands -- great quality of life improvement
-        s.program.append(pseudo_asm_machine.insn_wrapper(opcode, operands))
+        s.program.append((opcode, operands))
     
     def exe(s, start=None, end=None, instructions=0, program=None):
         """
@@ -77,9 +70,11 @@ class pseudo_asm_machine(machine):
             end = s.look_up_label(end)
         while s.pc < end:
             # get the next instruction
-            instruction = program[s.pc // 4]
+            opcode, operands = program[s.pc // 4]
             # execute the instruction. this also increments the program counter appropriately
-            instruction(s) # pass self.
+            s._update_counters(
+                opcode, operands[0], operands[1] if len(operands) > 2 else None) # mem is always at pos 3
+            getattr(s, opcode)(*operands)
         # done
 
     def measure_latency(s):
@@ -101,7 +96,7 @@ class pseudo_asm_machine(machine):
         s.x_usage = np.zeros(32, dtype=np.int8)
         s.x_usage[0] = 1
         s.f_usage = np.zeros(32, dtype=np.int8)
-        s.mem_usage = np.zeros(s.mem.shape[0], dtype=np.int8)
+        s.mem_usage = np.zeros(s.mem.shape[0]//4, dtype=np.int8)
     
     @property
     def registers(self):
@@ -129,15 +124,12 @@ class multi_machine(object):
         s.mem_size = mem_size
         s.program = []
     
-    @staticmethod
-    def insn_wrapper(op_str, operands):
-        return pseudo_asm_machine.insn_wrapper(op_str, operands)
     
     def append_instruction(s, opcode, operands):
         """
         Append an instruction to the program of all machines.
         """
-        s.program.append(multi_machine.insn_wrapper(opcode, operands))
+        s.program.append((opcode, operands))
     
     def exe(s, start:int=0, end=None, instructions=0):
         """

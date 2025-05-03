@@ -21,6 +21,7 @@ class pseudo_asm_machine(machine):
         s.program = []
         s.mem_usage = np.zeros(mem_size, dtype=np.int8)
         s.x_usage = np.zeros(32, dtype=np.int8)
+        s.x_usage[0] = 1 # x0 is always used
         s.f_usage = np.zeros(32, dtype=np.int8)
     
     @staticmethod
@@ -97,13 +98,17 @@ class pseudo_asm_machine(machine):
         s.pc = 0
         s.clear_cpu()
         s.clear_mem()
+        s.x_usage = np.zeros(32, dtype=np.int8)
+        s.x_usage[0] = 1
+        s.f_usage = np.zeros(32, dtype=np.int8)
+        s.mem_usage = np.zeros(s.mem.shape[0], dtype=np.int8)
     
     @property
     def registers(self):
         return np.concatenate([self.x, self.f], axis=0)
     @property
     def memory(self):
-        return self.mem
+        return self.read_i32_vec(0, self.mem.shape[0]//4)
     @property
     def register_mask(self):
         return np.concatenate([self.x_usage, self.f_usage], axis=0)

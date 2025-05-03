@@ -139,7 +139,7 @@ class multi_machine(object):
         """
         s.program.append(multi_machine.insn_wrapper(opcode, operands))
     
-    def exe(s, start:int, end=None, instructions=0):
+    def exe(s, start:int=0, end=None, instructions=0):
         """
         Execute the program on all machines.
         """
@@ -213,11 +213,10 @@ class multi_machine(object):
             c.mem =            s.mem.copy()
             c.x =              s.x.copy()
             c.f =              s.f.copy()
-            c.pc =             s.pc.copy()
+            c.pc =             s.pc
             c.label_dict =     s.label_dict.copy()
             c.ops =            s.ops.copy()
             c.x_usage =        s.x_usage.copy()
             c.f_usage =        s.f_usage.copy()
             c.mem_usage =      s.mem_usage.copy()
-            c.machines[i].pc = s.machines[i].pc
         return clone

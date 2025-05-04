@@ -192,6 +192,9 @@ class multi_machine(object):
     @property
     def memory_mask(self):
         return np.stack([m.memory_mask for m in self.machines])
+    @property
+    def program_counter(self):
+        return np.stack([m.pc // 4 for m in self.machines])
     
     def clone(self):
         # takes care of creating the new machine instances

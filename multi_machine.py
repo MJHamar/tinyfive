@@ -22,13 +22,21 @@ class pseudo_asm_machine(machine):
                     'fsgnjn.s', 'fsgnjx.s', 'fcvt.s.w', 'fcvt.s.wu', 'fmv.w.x'}
     store_opcodes = {'sb', 'sh', 'sw', 'fsw.s'}
     
-    def __init__(s, mem_size):
+    def __init__(s, mem_size, initial_state=None):
         super().__init__(mem_size)
         s.program = []
         s.mem_usage = np.zeros(mem_size//4, dtype=np.int8)
         s.x_usage = np.zeros(32, dtype=np.int8)
         s.x_usage[0] = 1 # x0 is always used
         s.f_usage = np.zeros(32, dtype=np.int8)
+        s.init_mem = None
+        if initial_state is not None:
+            # write the initial state to the memory
+            s.write_i32_vec(0, initial_state)
+            # update the memory usage
+            s.mem_usage[:len(initial_state)//4] = 1
+            # cache the initial state
+            s.init_mem = (s.mem.copy(), s.mem_usage.copy())
     
     def _update_counters(s, opcode, rd, mem):
         """Update self.x_usage, self.f_usage and self.mem_usage counters."""
@@ -97,6 +105,9 @@ class pseudo_asm_machine(machine):
         s.x_usage[0] = 1
         s.f_usage = np.zeros(32, dtype=np.int8)
         s.mem_usage = np.zeros(s.mem.shape[0]//4, dtype=np.int8)
+        if s.init_mem is not None:
+            s.mem, s.mem_usage = s.init_mem[0].copy(), s.init_mem[1].copy()
+        
     
     @property
     def registers(self):
@@ -115,11 +126,19 @@ class multi_machine(object):
     """
     A collection of machines that share the same program but not the same state (registers, memory, pc).
     """
-    def __init__(s, mem_size, num_machines):
+    def __init__(s, mem_size, num_machines, initial_state=None):
         """
         Initialize the multi-machine with the given number of machines and memory size.
         """
-        s.machines = [pseudo_asm_machine(mem_size) for _ in range(num_machines)]
+        assert (initial_state is None or
+                initial_state.shape[0] == num_machines and
+                len(initial_state.shape) == 2), \
+            f"Expected initial_state to be of shape ({num_machines}, N), got {initial_state.shape}"
+        s.machines = [] 
+        for i in range(num_machines):
+            # create a new machine instance
+            s_init = None if initial_state is None else initial_state[i]
+            s.machines.append(pseudo_asm_machine(mem_size, s_init))
         s.num_machines = num_machines
         s.mem_size = mem_size
         s.program = []
@@ -154,31 +173,23 @@ class multi_machine(object):
         for machine in s.machines:
             machine.reset_state()
 
-    def set_memory(s, idx:int, inputs: Union[np.ndarray, int, float]):
+    def set_memory(s, inputs: np.ndarray):
         """
         Set the memory of the machine at index idx to the given inputs.
         """
-        if idx < 0 or idx >= s.num_machines:
-            raise ValueError(f"Invalid machine index: {idx}")
-        s._populate_memory(idx, inputs)
+        s._populate_memory(inputs)
 
-    def _populate_memory(self, idx:int, inputs: Union[np.ndarray, int, float]):
+    def _populate_memory(self, inputs: np.ndarray):
         # overflow checks
-        instance = self.machines[idx]
-        instance.clear_mem()
-        if isinstance(inputs, (np.ndarray, list)):
-            if inputs.dtype == np.int32 or inputs.dtype == np.uint32 or inputs.dtype == np.int64:
-                instance.write_i32_vec(inputs, 0)
-            elif inputs.dtype == np.float32 or inputs.dtype == np.float64:
-                instance.write_f32_vec(inputs, 0)
-            else:
-                raise ValueError(f"Unsupported dtype: {inputs.dtype}")
-        elif isinstance(inputs, int):
-            instance.write_i32(inputs, 0)
-        elif isinstance(inputs, float):
-            instance.write_f32(inputs, 0)
-        else:
-            raise ValueError(f"Unsupported input type: {type(inputs)}")
+        # inputs is a 2D array of shape (num_machines, input_size)
+        if inputs.shape[0] != self.num_machines:
+            raise ValueError(f"Expected {self.num_machines} inputs, got {inputs.shape[0]}")
+        for i in range(self.num_machines):
+            instance = self.machines[i]
+            instance.clear_mem()
+            
+            inputs_i = inputs[i]
+            instance.write_i32_vec(0, inputs_i)
 
     @property
     def registers(self):
@@ -214,4 +225,5 @@ class multi_machine(object):
             c.x_usage =        s.x_usage.copy()
             c.f_usage =        s.f_usage.copy()
             c.mem_usage =      s.mem_usage.copy()
+            c.init_mem =       s.init_mem.copy()
         return clone

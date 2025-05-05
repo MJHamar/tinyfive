@@ -138,6 +138,8 @@ class pseudo_asm_machine(machine):
         c.init_mem =       (s.init_mem[0].copy(), # memory and memory usage
                             s.init_mem[1].copy()) if\
                                 s.init_mem is not None else None
+        c.program =        s.program.copy() if s.program is not None else None
+        return c
 
 class multi_machine(object):
     """

@@ -5,6 +5,9 @@ import numpy as np
 
 from .machine import machine
 
+import logging
+logger = logging.getLogger(__name__)
+
 class pseudo_asm_machine(machine):
     """
     Implementation of the machine class without the need for assembling and disassembling the program.
@@ -32,7 +35,7 @@ class pseudo_asm_machine(machine):
         s.init_mem = None
         if initial_state is not None:
             # write the initial state to the memory
-            s.write_i32_vec(0, initial_state)
+            s.write_i32_vec(initial_state, 0)
             # update the memory usage
             s.mem_usage[:len(initial_state)//4] = 1
             # cache the initial state
@@ -107,7 +110,6 @@ class pseudo_asm_machine(machine):
         s.mem_usage = np.zeros(s.mem.shape[0]//4, dtype=np.int8)
         if s.init_mem is not None:
             s.mem, s.mem_usage = s.init_mem[0].copy(), s.init_mem[1].copy()
-        
     
     @property
     def registers(self):
@@ -122,6 +124,21 @@ class pseudo_asm_machine(machine):
     def memory_mask(self):
         return self.mem_usage
 
+    def clone(s):
+        c = object.__new__(pseudo_asm_machine)
+        c.mem =            s.mem.copy()
+        c.x =              s.x.copy()
+        c.f =              s.f.copy()
+        c.pc =             s.pc
+        c.label_dict =     s.label_dict.copy()
+        c.ops =            s.ops.copy()
+        c.x_usage =        s.x_usage.copy()
+        c.f_usage =        s.f_usage.copy()
+        c.mem_usage =      s.mem_usage.copy()
+        c.init_mem =       (s.init_mem[0].copy(), # memory and memory usage
+                            s.init_mem[1].copy()) if\
+                                s.init_mem is not None else None
+
 class multi_machine(object):
     """
     A collection of machines that share the same program but not the same state (registers, memory, pc).
@@ -134,7 +151,7 @@ class multi_machine(object):
                 initial_state.shape[0] == num_machines and
                 len(initial_state.shape) == 2), \
             f"Expected initial_state to be of shape ({num_machines}, N), got {initial_state.shape}"
-        s.machines = [] 
+        s.machines = []
         for i in range(num_machines):
             # create a new machine instance
             s_init = None if initial_state is None else initial_state[i]
@@ -142,7 +159,6 @@ class multi_machine(object):
         s.num_machines = num_machines
         s.mem_size = mem_size
         s.program = []
-    
     
     def append_instruction(s, opcode, operands):
         """
@@ -189,7 +205,7 @@ class multi_machine(object):
             instance.clear_mem()
             
             inputs_i = inputs[i]
-            instance.write_i32_vec(0, inputs_i)
+            instance.write_i32_vec(inputs_i, 0)
 
     @property
     def registers(self):
@@ -208,22 +224,11 @@ class multi_machine(object):
         return np.stack([m.pc // 4 for m in self.machines])
     
     def clone(self):
-        # takes care of creating the new machine instances
-        clone = multi_machine(self.mem_size, self.num_machines)
-        # copy the program
+        clone = object.__new__(multi_machine)
+        clone.num_machines = self.num_machines
+        clone.mem_size = self.mem_size
         clone.program = self.program.copy()
-        # copy the state of each machine
-        for i in range(self.num_machines):
-            c = clone.machines[i]
-            s = self.machines[i]
-            c.mem =            s.mem.copy()
-            c.x =              s.x.copy()
-            c.f =              s.f.copy()
-            c.pc =             s.pc
-            c.label_dict =     s.label_dict.copy()
-            c.ops =            s.ops.copy()
-            c.x_usage =        s.x_usage.copy()
-            c.f_usage =        s.f_usage.copy()
-            c.mem_usage =      s.mem_usage.copy()
-            c.init_mem =       s.init_mem.copy()
+        clone.machines = [
+            m.clone() for m in self.machines
+        ]
         return clone

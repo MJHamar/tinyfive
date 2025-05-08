@@ -88,12 +88,34 @@ class pseudo_asm_machine(machine):
             getattr(s, opcode)(*operands)
         # done
 
-    def measure_latency(s):
+    def measure_latency(s,  start=None, end=None, instructions=0, program=None):
         """
         Measure the latency of the program.
         """
+        if program is None:
+            program = s.program
+        if program is None:
+            program = s.program
+        # reset the program counter
+        if start is None:
+            start = 0
+        start = s.look_up_label(start)
+        s.pc = start
+        
+        # NOTE: s.pc is always incremented by multiples of 4
+        if end is None and not instructions: # execute until the end by default
+            end = len(program) * 4
+        elif end is None: # stop after a given number of instructions
+            end = start + instructions * 4
+        else: # stop at the given end label or address
+            end = s.look_up_label(end)
         start = time()
-        s.exe()
+        while s.pc < end:
+            # get the next instruction
+            opcode, operands = program[s.pc // 4](s.pc)
+            # execute the instruction. this also increments the program counter appropriately
+            getattr(s, opcode)(*operands)
+            # NOTE: we didn't update the counters.
         end = time()
         return float(end - start)
 
@@ -101,6 +123,7 @@ class pseudo_asm_machine(machine):
         """
         Reset the machine to its initial state.
         """
+        s.program = []
         s.pc = 0
         s.clear_cpu()
         s.clear_mem()
@@ -168,26 +191,33 @@ class multi_machine(object):
         """
         s.program.append((opcode, operands))
     
-    def exe(s, start:int=0, end=None, instructions=0):
+    def exe(s, start:int=0, end=None, instructions=0, program=None):
         """
         Execute the program on all machines.
         """
+        if program is None:
+            program = s.program
+        assert len(program) > 0, "Program is empty"
         for machine in s.machines:
             machine.exe(start, end, instructions, s.program)
     
-    def measure_latency(s):
+    def measure_latency(s, program=None) -> np.ndarray:
         """
         Measure the latency of the program on all machines.
         """
+        if program is None:
+            program = s.program
+        assert len(program) > 0, "Program is empty"
         latencies = []
         for machine in s.machines:
-            latencies.append(machine.measure_latency())
-        return latencies
+            latencies.append(machine.measure_latency(program=s.program))
+        return np.stack(latencies).mean()
     
     def reset_state(s):
         """
         Reset all machines to their initial state.
         """
+        s.program.clear()
         for machine in s.machines:
             machine.reset_state()
 

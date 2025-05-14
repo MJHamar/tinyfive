@@ -112,7 +112,7 @@ class pseudo_asm_machine(machine):
         start = time()
         while s.pc < end:
             # get the next instruction
-            opcode, operands = program[s.pc // 4](s.pc)
+            opcode, operands = program[s.pc // 4]
             # execute the instruction. this also increments the program counter appropriately
             getattr(s, opcode)(*operands)
             # NOTE: we didn't update the counters.

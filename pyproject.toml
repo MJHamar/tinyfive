@@ -1,0 +1,32 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "tinyfive"
+version = "1.0.1" # Original was 1.0.0, bumped due to packaging changes
+description = "TinyFive is a lightweight RISC-V emulator and assembler written entirely in Python"
+readme = "README.md" # Ensure README.md exists in src/alphadev/tinyfive/
+requires-python = ">=3.6"
+authors = [
+  {name="Open Machine", email="tinyfive@openmachine.ai"},
+]
+license = { file = "LICENSE" } # Ensure LICENSE file exists in src/alphadev/tinyfive/
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+]
+dependencies = [
+  "numpy>1.20.0", # As per the old pyproject.toml for tinyfive
+]
+
+[project.urls]
+"Homepage" = "https://github.com/OpenMachine-ai/tinyfive"
+"Bug Tracker" = "https://github.com/OpenMachine-ai/tinyfive/issues"
+
+[tool.hatch.build.targets.wheel]
+# This tells hatchling to look for a directory named 'tinyfive_src'
+# (relative to this pyproject.toml, i.e., src/alphadev/tinyfive/tinyfive_src/)
+# and package its contents as the 'tinyfive' package.
+packages = ["tinyfive"]

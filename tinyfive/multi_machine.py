@@ -81,7 +81,7 @@ class pseudo_asm_machine(machine):
             end = s.look_up_label(end)
         while s.pc < end:
             # get the next instruction
-            opcode, operands = program[s.pc // 4](s.pc)
+            opcode, operands = program[s.pc // 4]
             # execute the instruction. this also increments the program counter appropriately
             s._update_counters(
                 opcode, operands[0], operands[1] if len(operands) > 2 else None) # mem is always at pos 3

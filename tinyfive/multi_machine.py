@@ -199,7 +199,7 @@ class multi_machine(object):
             program = s.program
         assert len(program) > 0, "Program is empty"
         for machine in s.machines:
-            machine.exe(start, end, instructions, s.program)
+            machine.exe(start, end, instructions, program)
     
     def measure_latency(s, program=None) -> np.ndarray:
         """
@@ -210,7 +210,7 @@ class multi_machine(object):
         assert len(program) > 0, "Program is empty"
         latencies = []
         for machine in s.machines:
-            latencies.append(machine.measure_latency(program=s.program))
+            latencies.append(machine.measure_latency(program=program))
         return np.stack(latencies).mean()
     
     def reset_state(s):

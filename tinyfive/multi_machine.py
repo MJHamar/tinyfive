@@ -37,7 +37,7 @@ class pseudo_asm_machine(machine):
             # write the initial state to the memory
             s.write_i32_vec(initial_state, 0)
             # update the memory usage
-            s.mem_usage[:len(initial_state)//4] = 1
+            s.mem_usage[:len(initial_state)] = 1
             # cache the initial state
             s.init_mem = (s.mem.copy(), s.mem_usage.copy())
     
@@ -52,7 +52,7 @@ class pseudo_asm_machine(machine):
                 s.x_usage[rd] = 1
         if opcode.lower() in s.float_opcodes:
             assert mem is not None, f"mem is None for opcode {opcode}"
-            s.mem_usage[mem//4] = 1 # NOTE: assumes 4 byte alignment
+            s.mem_usage[mem] = 1 # NOTE: assumes 4 byte alignment
 
     def append_instruction(s, opcode, operands):
         # TODO: check if the opcode is valid.
@@ -84,7 +84,8 @@ class pseudo_asm_machine(machine):
             opcode, operands = program[s.pc // 4]
             # execute the instruction. this also increments the program counter appropriately
             s._update_counters(
-                opcode, operands[0], operands[1] if len(operands) > 2 else None) # mem is always at pos 3
+            #   opcode  rd           mem (imm)   rs1
+                opcode, operands[0], operands[1] if len(operands) > 2 else None) # mem is always at pos 2
             getattr(s, opcode)(*operands)
         # done
 

@@ -25,13 +25,15 @@ class pseudo_asm_machine(machine):
                     'fsgnjn.s', 'fsgnjx.s', 'fcvt.s.w', 'fcvt.s.wu', 'fmv.w.x'}
     store_opcodes = {'sb', 'sh', 'sw', 'fsw.s'}
     
-    def __init__(s, mem_size, initial_state=None):
+    def __init__(s, mem_size, initial_state=None, special_x_regs:np.ndarray=None, special_f_regs:np.ndarray=None):
         super().__init__(mem_size)
         s.program = []
         s.mem_usage = np.zeros(mem_size//4, dtype=np.int8)
         s.x_usage = np.zeros(32, dtype=np.int8)
         s.x_usage[0] = 1 # x0 is always used
+        s.x_usage[special_x_regs] = 1 if special_x_regs is not None else 0
         s.f_usage = np.zeros(32, dtype=np.int8)
+        s.f_usage[special_f_regs] = 1 if special_f_regs is not None else 0
         s.init_mem = None
         if initial_state is not None:
             # write the initial state to the memory
@@ -40,6 +42,8 @@ class pseudo_asm_machine(machine):
             s.mem_usage[:len(initial_state)] = 1
             # cache the initial state
             s.init_mem = (s.mem.copy(), s.mem_usage.copy())
+        s.init_x   = (s.x.copy()  , s.x_usage.copy()  )
+        s.init_f   = (s.f.copy()  , s.f_usage.copy()  )
     
     def _update_counters(s, opcode, rd, mem):
         """Update self.x_usage, self.f_usage and self.mem_usage counters."""
@@ -134,6 +138,10 @@ class pseudo_asm_machine(machine):
         s.mem_usage = np.zeros(s.mem.shape[0]//4, dtype=np.int8)
         if s.init_mem is not None:
             s.mem, s.mem_usage = s.init_mem[0].copy(), s.init_mem[1].copy()
+        if s.init_x is not None:
+            s.x, s.x_usage = s.init_x[0].copy(), s.init_x[1].copy()
+        if s.init_f is not None:
+            s.f, s.f_usage = s.init_f[0].copy(), s.init_f[1].copy()
     
     @property
     def registers(self):
@@ -169,7 +177,7 @@ class multi_machine(object):
     """
     A collection of machines that share the same program but not the same state (registers, memory, pc).
     """
-    def __init__(s, mem_size, num_machines, initial_state=None):
+    def __init__(s, mem_size, num_machines, initial_state=None, special_x_regs:np.ndarray=None, special_f_regs:np.ndarray=None):
         """
         Initialize the multi-machine with the given number of machines and memory size.
         """
@@ -181,7 +189,9 @@ class multi_machine(object):
         for i in range(num_machines):
             # create a new machine instance
             s_init = None if initial_state is None else initial_state[i]
-            s.machines.append(pseudo_asm_machine(mem_size, s_init))
+            s.machines.append(pseudo_asm_machine(
+                mem_size, s_init,
+                special_x_regs, special_f_regs))
         s.num_machines = num_machines
         s.mem_size = mem_size
         s.program = []

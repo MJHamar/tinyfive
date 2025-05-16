@@ -170,6 +170,12 @@ class pseudo_asm_machine(machine):
         c.init_mem =       (s.init_mem[0].copy(), # memory and memory usage
                             s.init_mem[1].copy()) if\
                                 s.init_mem is not None else None
+        c.init_x =         (s.init_x[0].copy(), # x and x usage
+                            s.init_x[1].copy()) if\
+                                s.init_x is not None else None
+        c.init_f =         (s.init_f[0].copy(), # f and f usage
+                            s.init_f[1].copy()) if\
+                                s.init_f is not None else None
         c.program =        s.program.copy() if s.program is not None else None
         return c
 

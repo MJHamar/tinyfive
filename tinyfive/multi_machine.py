@@ -1,5 +1,5 @@
 from time import time
-from typing import Union
+from typing import Union, Literal
 
 import numpy as np
 
@@ -157,7 +157,7 @@ class pseudo_asm_machine(machine):
         return self.mem_usage
 
     def clone(s):
-        c = object.__new__(pseudo_asm_machine)
+        c = object.__new__(s.__class__)
         c.mem =            s.mem.copy()
         c.x =              s.x.copy()
         c.f =              s.f.copy()
@@ -179,11 +179,83 @@ class pseudo_asm_machine(machine):
         c.program =        s.program.copy() if s.program is not None else None
         return c
 
+class pseudo_asm_machine_32(pseudo_asm_machine):
+    """Pseudo assembly machine with 32-bit registers and memory locations."""
+    def __init__(s, mem_size, initial_state=None, special_x_regs = None, special_f_regs = None):
+        s.mem = np.zeros(mem_size, dtype=np.int32)  # NOTE: memory is 32-bit, not 8 like in the original machine
+        s.x   = np.zeros(32, dtype=np.int32)        # regfile 'x[]' is signed int32
+        s.f   = np.zeros(32, dtype=np.float32)      # regfile 'f[]' for F-extension
+        s.pc  = np.zeros(1, dtype=np.uint32)        # program counter (PC) is uint32
+        s.label_dict = {}  # label dictionary (for assembly-code labels)
+
+        # performance counters: ops-counters, regfile-usage
+        s.ops = {'total': 0, 'load': 0, 'store': 0, 'mul': 0, 'add': 0, 'madd': 0, 'branch': 0}
+        s.x_usage = np.zeros(32, dtype=np.int8)  # track usage of x registers
+        s.f_usage = np.zeros(32, dtype=np.int8)  # track usage of f registers
+
+        s.program = []
+        s.mem_usage = np.zeros(mem_size, dtype=np.int8)
+        s.x_usage = np.zeros(32, dtype=np.int8)
+        s.x_usage[0] = 1 # x0 is always used
+        s.x_usage[special_x_regs] = 1 if special_x_regs is not None else 0
+        s.f_usage = np.zeros(32, dtype=np.int8)
+        s.f_usage[special_f_regs] = 1 if special_f_regs is not None else 0
+        s.init_mem = None
+        if initial_state is not None:
+            # write the initial state to the memory
+            s.write_i32_vec(initial_state, 0)
+            # update the memory usage
+            s.mem_usage[:len(initial_state)] = 1
+            # cache the initial state
+            s.init_mem = (s.mem.copy(), s.mem_usage.copy())
+        s.init_x   = (s.x.copy()  , s.x_usage.copy()  )
+        s.init_f   = (s.f.copy()  , s.f_usage.copy()  )
+    
+    # ---------------
+    # override the memory-wise asm instructions to use 32-bit registers and memory
+
+    # load, note the different argument order, example: 'lb rd, offset(rs1)'
+    def LB (s,rd,imm,rs1): raise NotImplementedError("LB is not implemented in 32-bit mode, use LW instead")
+    def LBU(s,rd,imm,rs1): raise NotImplementedError("LBU is not implemented in 32-bit mode, use LW instead")
+    def LH (s,rd,imm,rs1): raise NotImplementedError("LH is not implemented in 32-bit mode, use LW instead")
+    def LHU(s,rd,imm,rs1): raise NotImplementedError("LHU is not implemented in 32-bit mode, use LW instead")
+    def LW (s,rd,imm,rs1): s.x[rd] = s.mem[s.x[rs1] + imm];  s.ipc()
+
+    # store, note the different argument order, example: 'sb rs2, offset(rs1)'
+    def SB(s,rs2,imm,rs1): raise NotImplementedError("SB is not implemented in 32-bit mode, use SW instead")
+    def SH(s,rs2,imm,rs1): raise NotImplementedError("SH is not implemented in 32-bit mode, use SW instead")
+    def SW(s,rs2,imm,rs1): s.mem[s.x[rs1] + imm] = s.x[rs2]; s.ipc()
+
+    def FLW_S(s,rd,imm,rs1): s.f[rd] = s.b2f(s.mem[s.x[rs1] + imm]); s.ipc()
+
+    def FSW_S(s,rs2,imm,rs1): s.mem[s.x[rs1] + imm] = s.f2b(rs2);    s.ipc()
+
+    # --------------
+    # override [read|write]_i32_vec to read|write 32-bit integers
+    def read_i32_vec(s, offset, size):
+        return s.mem[offset:(offset + size)]
+
+    def write_i32_vec(s, values, offset):
+        assert values.dtype == np.int32, f"Expected values to be of dtype np.int32, got {values.dtype}"
+        assert offset + len(values) <= s.mem.shape[0], \
+            f"Memory overflow: trying to write {len(values)} words at offset {offset}, but memory size is {s.mem.shape[0]}"
+        s.mem[offset:(offset + len(values))] = values
+
+    def read_i32(s, addr):
+        return s.mem[addr]
+    def write_i32(s, addr, value):
+        assert addr < s.mem.shape[0], f"Memory overflow: trying to write at address {addr}, but memory size is {s.mem.shape[0]}"
+        s.mem[addr] = value
+    
+    @property
+    def memory(s):
+        return s.mem
+
 class multi_machine(object):
     """
     A collection of machines that share the same program but not the same state (registers, memory, pc).
     """
-    def __init__(s, mem_size, num_machines, initial_state=None, special_x_regs:np.ndarray=None, special_f_regs:np.ndarray=None):
+    def __init__(s, mem_size, num_machines, initial_state=None, special_x_regs:np.ndarray=None, special_f_regs:np.ndarray=None, mode:Literal['u8', 'i16', 'i32']='i32'):
         """
         Initialize the multi-machine with the given number of machines and memory size.
         """
@@ -192,10 +264,21 @@ class multi_machine(object):
                 len(initial_state.shape) == 2), \
             f"Expected initial_state to be of shape ({num_machines}, N), got {initial_state.shape}"
         s.machines = []
+        # mem_size is expected to refer to 32 bit words
+        if mode == 'u8':
+            mem_size *= 4  # convert to bytes
+            machine_cls = pseudo_asm_machine
+        elif mode == 'i16':
+            mem_size *= 2
+            raise NotImplementedError("16-bit mode is not implemented yet")
+        elif mode == 'i32':
+            mem_size *= 1
+            machine_cls = pseudo_asm_machine_32
+        
         for i in range(num_machines):
             # create a new machine instance
             s_init = None if initial_state is None else initial_state[i]
-            s.machines.append(pseudo_asm_machine(
+            s.machines.append(machine_cls(
                 mem_size, s_init,
                 special_x_regs, special_f_regs))
         s.num_machines = num_machines

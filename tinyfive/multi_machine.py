@@ -25,10 +25,13 @@ class pseudo_asm_machine(machine):
                     'fsgnjn.s', 'fsgnjx.s', 'fcvt.s.w', 'fcvt.s.wu', 'fmv.w.x'}
     store_opcodes = {'sb', 'sh', 'sw', 'fsw.s'}
     
-    def __init__(s, mem_size, initial_state=None, special_x_regs:np.ndarray=None, special_f_regs:np.ndarray=None):
+    def __init__(s, mem_size, initial_state=None,
+                 special_x_regs:np.ndarray=None, special_f_regs:np.ndarray=None,
+                 track_usage:bool=True):
         super().__init__(mem_size)
         s.program = []
         s.mem_usage = np.zeros(mem_size//4, dtype=np.int8)
+        s.track_usage = track_usage
         s.x_usage = np.zeros(32, dtype=np.int8)
         s.x_usage[0] = 1 # x0 is always used
         s.x_usage[special_x_regs] = 1 if special_x_regs is not None else 0
@@ -87,9 +90,10 @@ class pseudo_asm_machine(machine):
             # get the next instruction
             opcode, operands = program[s.pc // 4]
             # execute the instruction. this also increments the program counter appropriately
-            s._update_counters(
-            #   opcode  rd           mem (imm)   rs1
-                opcode, operands[0], operands[1] if len(operands) > 2 else None) # mem is always at pos 2
+            if s.track_usage:
+                s._update_counters(
+                #   opcode  rd           mem (imm)   rs1
+                    opcode, operands[0], operands[1] if len(operands) > 2 else None) # mem is always at pos 2
             getattr(s, opcode)(*operands)
         # done
 
@@ -164,6 +168,7 @@ class pseudo_asm_machine(machine):
         c.pc =             s.pc
         c.label_dict =     s.label_dict.copy()
         c.ops =            s.ops.copy()
+        c.track_usage =    s.track_usage
         c.x_usage =        s.x_usage.copy()
         c.f_usage =        s.f_usage.copy()
         c.mem_usage =      s.mem_usage.copy()
@@ -181,7 +186,9 @@ class pseudo_asm_machine(machine):
 
 class pseudo_asm_machine_32(pseudo_asm_machine):
     """Pseudo assembly machine with 32-bit registers and memory locations."""
-    def __init__(s, mem_size, initial_state=None, special_x_regs = None, special_f_regs = None):
+    def __init__(s, mem_size, initial_state=None,
+                 special_x_regs = None, special_f_regs = None,
+                 track_usage:bool=True):
         s.mem = np.zeros(mem_size, dtype=np.int32)  # NOTE: memory is 32-bit, not 8 like in the original machine
         s.x   = np.zeros(32, dtype=np.int32)        # regfile 'x[]' is signed int32
         s.f   = np.zeros(32, dtype=np.float32)      # regfile 'f[]' for F-extension
@@ -195,6 +202,7 @@ class pseudo_asm_machine_32(pseudo_asm_machine):
 
         s.program = []
         s.mem_usage = np.zeros(mem_size, dtype=np.int8)
+        s.track_usage = track_usage
         s.x_usage = np.zeros(32, dtype=np.int8)
         s.x_usage[0] = 1 # x0 is always used
         s.x_usage[special_x_regs] = 1 if special_x_regs is not None else 0
@@ -255,7 +263,9 @@ class multi_machine(object):
     """
     A collection of machines that share the same program but not the same state (registers, memory, pc).
     """
-    def __init__(s, mem_size, num_machines, initial_state=None, special_x_regs:np.ndarray=None, special_f_regs:np.ndarray=None, mode:Literal['u8', 'i16', 'i32']='i32'):
+    def __init__(s, mem_size, num_machines, initial_state=None,
+                 special_x_regs:np.ndarray=None, special_f_regs:np.ndarray=None,
+                 mode:Literal['u8', 'i16', 'i32']='i32', track_usage:bool=True):
         """
         Initialize the multi-machine with the given number of machines and memory size.
         """
@@ -280,7 +290,9 @@ class multi_machine(object):
             s_init = None if initial_state is None else initial_state[i]
             s.machines.append(machine_cls(
                 mem_size, s_init,
-                special_x_regs, special_f_regs))
+                special_x_regs, special_f_regs,
+                track_usage=track_usage
+            ))
         s.num_machines = num_machines
         s.mem_size = mem_size
         s.program = []

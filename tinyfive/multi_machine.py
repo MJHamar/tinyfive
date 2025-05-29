@@ -27,33 +27,50 @@ class pseudo_asm_machine(machine):
     
     def __init__(s, mem_size, initial_state=None,
                  special_x_regs:np.ndarray=None, special_f_regs:np.ndarray=None,
-                 track_usage:bool=True):
+                 track_usage:bool=True, use_fp:bool=True):
         super().__init__(mem_size)
+        if not use_fp:
+            del s.f; 
+        if not track_usage or not use_fp:
+            del s.f_usage
+        if not track_usage:
+            del s.x_usage
         s.program = []
-        s.mem_usage = np.zeros(mem_size//4, dtype=np.int8)
         s.track_usage = track_usage
-        s.x_usage = np.zeros(32, dtype=np.int8)
-        s.x_usage[0] = 1 # x0 is always used
-        s.x_usage[special_x_regs] = 1 if special_x_regs is not None else 0
-        s.f_usage = np.zeros(32, dtype=np.int8)
-        s.f_usage[special_f_regs] = 1 if special_f_regs is not None else 0
+        s.use_fp = use_fp
+        s.init_x   = (s.x.copy(), None)
+        if track_usage:
+            s.mem_usage = np.zeros(mem_size//4, dtype=np.int8)
+            s.x_usage = np.zeros(32, dtype=np.int8)
+            s.x_usage[0] = 1 # x0 is always used
+            s.x_usage[special_x_regs] = 1 if special_x_regs is not None else 0
+            s.init_x   = (s.x.copy()  , s.x_usage.copy()  )
+        if use_fp and not track_usage:
+            s.init_f   = (s.f.copy(), None)
+        elif use_fp and track_usage:
+            s.f_usage = np.zeros(32, dtype=np.int8)
+            s.f_usage[special_f_regs] = 1 if special_f_regs is not None else 0
+            s.init_f   = (s.f.copy()  , s.f_usage.copy()  )
         s.init_mem = None
         if initial_state is not None:
             # write the initial state to the memory
             s.write_i32_vec(initial_state, 0)
             # update the memory usage
-            s.mem_usage[:len(initial_state)] = 1
+            if track_usage:
+                s.mem_usage[:len(initial_state)] = 1
+                s.init_mem = (s.mem.copy(), s.mem_usage.copy())
+            else:
+                s.init_mem = (s.mem.copy(), None)
             # cache the initial state
-            s.init_mem = (s.mem.copy(), s.mem_usage.copy())
-        s.init_x   = (s.x.copy()  , s.x_usage.copy()  )
-        s.init_f   = (s.f.copy()  , s.f_usage.copy()  )
     
     def _update_counters(s, opcode, rd, mem):
         """Update self.x_usage, self.f_usage and self.mem_usage counters."""
+        if not s.track_usage:
+            return
         # borrowed from super().dec()
         if opcode.lower() not in s.rd_opcodes:
             assert rd is not None, f"rd is None for opcode {opcode}"
-            if opcode.lower() in s.float_opcodes:
+            if s.use_fp and opcode.lower() in s.float_opcodes:
                 s.f_usage[rd] = 1
             else:
                 s.x_usage[rd] = 1
@@ -90,10 +107,9 @@ class pseudo_asm_machine(machine):
             # get the next instruction
             opcode, operands = program[s.pc // 4]
             # execute the instruction. this also increments the program counter appropriately
-            if s.track_usage:
-                s._update_counters(
-                #   opcode  rd           mem (imm)   rs1
-                    opcode, operands[0], operands[1] if len(operands) > 2 else None) # mem is always at pos 2
+            s._update_counters(
+            #   opcode  rd           mem (imm)   rs1
+                opcode, operands[0], operands[1] if len(operands) > 2 else None) # mem is always at pos 2
             getattr(s, opcode)(*operands)
         # done
 
@@ -134,90 +150,110 @@ class pseudo_asm_machine(machine):
         """
         s.program = []
         s.pc = 0
-        s.clear_cpu()
-        s.clear_mem()
-        s.x_usage = np.zeros(32, dtype=np.int8)
-        s.x_usage[0] = 1
-        s.f_usage = np.zeros(32, dtype=np.int8)
-        s.mem_usage = np.zeros(s.mem.shape[0]//4, dtype=np.int8)
+        s.label_dict = {}
+        s.ops = {'total': 0, 'load': 0, 'store': 0, 'mul': 0, 'add': 0, 'madd': 0, 'branch': 0}
+        
         if s.init_mem is not None:
-            s.mem, s.mem_usage = s.init_mem[0].copy(), s.init_mem[1].copy()
+            s.mem, s.mem_usage = s.init_mem[0].copy(), (s.init_mem[1].copy() if s.init_mem[1] is not None else None)
+        else:
+            s.mem.fill(0); 
+            if s.track_usage: s.mem_usage.fill(0)
+        
         if s.init_x is not None:
-            s.x, s.x_usage = s.init_x[0].copy(), s.init_x[1].copy()
-        if s.init_f is not None:
-            s.f, s.f_usage = s.init_f[0].copy(), s.init_f[1].copy()
+            s.x, s.x_usage = s.init_x[0].copy(), (s.init_x[1].copy() if s.init_x[1] is not None else None)
+        else:
+            s.x.fill(0); 
+            if s.track_usage: 
+                s.x_usage.fill(0); s.x_usage[0]=1
+        
+        if s.use_fp:
+            if s.init_f is not None:
+                s.f, s.f_usage = s.init_f[0].copy(), (s.init_f[1].copy() if s.init_f[1] is not None else None)
+            else:
+                s.f.fill(0)
+                if s.track_usage: s.f_usage.fill(0)
     
     @property
     def registers(self):
-        return np.concatenate([self.x, self.f], axis=0)
+        if self.use_fp:
+            return np.concatenate([self.x, self.f], axis=0)
+        else:
+            return self.x
     @property
     def memory(self):
         return self.read_i32_vec(0, self.mem.shape[0]//4)
     @property
     def register_mask(self):
-        return np.concatenate([self.x_usage, self.f_usage], axis=0)
+        if self.use_fp: 
+            return np.concatenate([self.x_usage, self.f_usage], axis=0)
+        else:
+            return self.x_usage
     @property
     def memory_mask(self):
         return self.mem_usage
 
     def clone(s):
         c = object.__new__(s.__class__)
+        c.track_usage =    s.track_usage
+        c.use_fp =         s.use_fp
         c.mem =            s.mem.copy()
         c.x =              s.x.copy()
-        c.f =              s.f.copy()
         c.pc =             s.pc
         c.label_dict =     s.label_dict.copy()
         c.ops =            s.ops.copy()
-        c.track_usage =    s.track_usage
-        c.x_usage =        s.x_usage.copy()
-        c.f_usage =        s.f_usage.copy()
-        c.mem_usage =      s.mem_usage.copy()
-        c.init_mem =       (s.init_mem[0].copy(), # memory and memory usage
-                            s.init_mem[1].copy()) if\
-                                s.init_mem is not None else None
-        c.init_x =         (s.init_x[0].copy(), # x and x usage
-                            s.init_x[1].copy()) if\
-                                s.init_x is not None else None
-        c.init_f =         (s.init_f[0].copy(), # f and f usage
-                            s.init_f[1].copy()) if\
-                                s.init_f is not None else None
+        if s.track_usage:
+            c.x_usage =    s.x_usage.copy()
+            c.mem_usage =  s.mem_usage.copy()
+        c.init_x =         s.init_x
+        c.init_mem =       s.init_mem
+        
         c.program =        s.program.copy() if s.program is not None else None
+        if s.use_fp:
+            c.f =          s.f.copy()
+            c.f_usage =    s.f_usage.copy()
+            c.init_f =     s.init_f
         return c
 
 class pseudo_asm_machine_32(pseudo_asm_machine):
     """Pseudo assembly machine with 32-bit registers and memory locations."""
     def __init__(s, mem_size, initial_state=None,
                  special_x_regs = None, special_f_regs = None,
-                 track_usage:bool=True):
+                 track_usage:bool=True, use_fp:bool=True):
         s.mem = np.zeros(mem_size, dtype=np.int32)  # NOTE: memory is 32-bit, not 8 like in the original machine
         s.x   = np.zeros(32, dtype=np.int32)        # regfile 'x[]' is signed int32
-        s.f   = np.zeros(32, dtype=np.float32)      # regfile 'f[]' for F-extension
+        if use_fp:
+            s.f   = np.zeros(32, dtype=np.float32)      # regfile 'f[]' for F-extension
         s.pc  = np.zeros(1, dtype=np.uint32)        # program counter (PC) is uint32
         s.label_dict = {}  # label dictionary (for assembly-code labels)
-
+        s.track_usage = track_usage
+        s.use_fp = use_fp
+        s.program = []
         # performance counters: ops-counters, regfile-usage
         s.ops = {'total': 0, 'load': 0, 'store': 0, 'mul': 0, 'add': 0, 'madd': 0, 'branch': 0}
-        s.x_usage = np.zeros(32, dtype=np.int8)  # track usage of x registers
-        s.f_usage = np.zeros(32, dtype=np.int8)  # track usage of f registers
-
-        s.program = []
-        s.mem_usage = np.zeros(mem_size, dtype=np.int8)
-        s.track_usage = track_usage
-        s.x_usage = np.zeros(32, dtype=np.int8)
-        s.x_usage[0] = 1 # x0 is always used
-        s.x_usage[special_x_regs] = 1 if special_x_regs is not None else 0
-        s.f_usage = np.zeros(32, dtype=np.int8)
-        s.f_usage[special_f_regs] = 1 if special_f_regs is not None else 0
+        
+        s.init_x   = (s.x.copy(), None)
+        if track_usage:
+            s.mem_usage = np.zeros(mem_size//4, dtype=np.int8)
+            s.x_usage = np.zeros(32, dtype=np.int8)
+            s.x_usage[0] = 1 # x0 is always used
+            s.x_usage[special_x_regs] = 1 if special_x_regs is not None else 0
+            s.init_x   = (s.x.copy()  , s.x_usage.copy()  )
+        if use_fp and not track_usage:
+            s.init_f   = (s.f.copy(), None)
+        elif use_fp and track_usage:
+            s.f_usage = np.zeros(32, dtype=np.int8)
+            s.f_usage[special_f_regs] = 1 if special_f_regs is not None else 0
+            s.init_f   = (s.f.copy()  , s.f_usage.copy()  )
         s.init_mem = None
         if initial_state is not None:
             # write the initial state to the memory
             s.write_i32_vec(initial_state, 0)
             # update the memory usage
-            s.mem_usage[:len(initial_state)] = 1
-            # cache the initial state
-            s.init_mem = (s.mem.copy(), s.mem_usage.copy())
-        s.init_x   = (s.x.copy()  , s.x_usage.copy()  )
-        s.init_f   = (s.f.copy()  , s.f_usage.copy()  )
+            if track_usage:
+                s.mem_usage[:len(initial_state)] = 1
+                s.init_mem = (s.mem.copy(), s.mem_usage.copy())
+            else:
+                s.init_mem = (s.mem.copy(), None)
     
     # ---------------
     # override the memory-wise asm instructions to use 32-bit registers and memory
@@ -265,7 +301,8 @@ class multi_machine(object):
     """
     def __init__(s, mem_size, num_machines, initial_state=None,
                  special_x_regs:np.ndarray=None, special_f_regs:np.ndarray=None,
-                 mode:Literal['u8', 'i16', 'i32']='i32', track_usage:bool=True):
+                 mode:Literal['u8', 'i16', 'i32']='i32', track_usage:bool=True,
+                 use_fp:bool=True):
         """
         Initialize the multi-machine with the given number of machines and memory size.
         """
@@ -291,7 +328,8 @@ class multi_machine(object):
             s.machines.append(machine_cls(
                 mem_size, s_init,
                 special_x_regs, special_f_regs,
-                track_usage=track_usage
+                track_usage=track_usage,
+                use_fp=use_fp
             ))
         s.num_machines = num_machines
         s.mem_size = mem_size
